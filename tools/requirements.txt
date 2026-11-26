@@ -1,0 +1,9 @@
+# Versions used for every result in docs/ (Python 3.12.3, Ubuntu 24.04 / WSL2)
+numpy==2.5.5
+scipy==1.18.1
+opencv-python-headless==5.1.0.95
+open3d==0.20.0
+matplotlib==3.11.2
+pillow==13.0.0
+gtsam==4.3.0
+gdown==6.5.2
