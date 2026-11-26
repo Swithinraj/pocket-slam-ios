@@ -1,0 +1,27 @@
+# build outputs
+.build/
+.swiftpm/
+App/xtool/
+App/.bsp/
+core/build/
+build/
+*.xip
+*.ipa
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# data (recordings are not part of the repo)
+recordings/
+*.zip
+_slam/
+_vlio/
+_var/
+_inspect/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

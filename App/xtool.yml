@@ -1,0 +1,5 @@
+version: 1
+# With a free Apple ID xtool prefixes this automatically (e.g. XTL-XXXX.com.slamtogo.SlamToGo).
+bundleID: com.slamtogo.SlamToGo
+product: SlamToGo
+infoPath: Info.plist
