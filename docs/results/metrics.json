@@ -1,0 +1,231 @@
+{
+  "recordings": {
+    "2026-11-26_00-15-22": {
+      "duration_s": 85.10648604199923,
+      "rgbd_frames": 724,
+      "arkit_fps": null,
+      "vlio_source": "VLIO PC KF",
+      "sources": {
+        "ARKit VIO": {
+          "ate_m": 0.04514646090484386,
+          "sim3_scale": 1.033163672831654,
+          "local_scale": 0.9650948765742582,
+          "lidar_seq_median_mm": 6.104080110994392,
+          "lidar_revisit_median_mm": 23.131523012742903
+        },
+        "Offline BA": {
+          "ate_m": 5.097816871641641e-16,
+          "sim3_scale": 1.0000000000000004,
+          "local_scale": 1.0,
+          "lidar_seq_median_mm": 5.775478280308888,
+          "lidar_revisit_median_mm": 8.9728473448506
+        },
+        "VLIO PC replay": {
+          "ate_m": 0.060333050402683636,
+          "sim3_scale": 0.982426015195684,
+          "local_scale": 1.0146489836109516,
+          "lidar_seq_median_mm": 8.814286218551626,
+          "lidar_revisit_median_mm": 51.09622584994122
+        },
+        "VLIO PC KF": {
+          "ate_m": 0.04982186801293643,
+          "sim3_scale": 0.9804291714495982,
+          "local_scale": 1.0138567997673578,
+          "lidar_seq_median_mm": 6.404745276734736,
+          "lidar_revisit_median_mm": 55.74741105730951
+        }
+      }
+    },
+    "2026-11-26_02-09-36": {
+      "duration_s": 171.62448037499962,
+      "rgbd_frames": 1654,
+      "arkit_fps": null,
+      "vlio_source": "VLIO device KF",
+      "sources": {
+        "ARKit VIO": {
+          "ate_m": 0.06951158569527935,
+          "sim3_scale": 1.0329811451950595,
+          "local_scale": 0.9704715471848788,
+          "lidar_seq_median_mm": 4.258505056197737,
+          "lidar_revisit_median_mm": 48.84281196211471
+        },
+        "Offline BA": {
+          "ate_m": 2.772261181001879e-16,
+          "sim3_scale": 1.0000000000000002,
+          "local_scale": 1.0,
+          "lidar_seq_median_mm": 3.923490207227043,
+          "lidar_revisit_median_mm": 26.429628768248172
+        },
+        "VLIO on-device": {
+          "ate_m": 0.1886958110210549,
+          "sim3_scale": 0.9456829930109798,
+          "local_scale": 1.0031772594412898,
+          "lidar_seq_median_mm": 5.94617071933079,
+          "lidar_revisit_median_mm": 25.30687481350835
+        },
+        "VLIO device KF": {
+          "ate_m": 0.17323555064820542,
+          "sim3_scale": 0.9501700764453576,
+          "local_scale": 0.9920871762800045,
+          "lidar_seq_median_mm": 5.885153633952589,
+          "lidar_revisit_median_mm": 10.852113709471812
+        },
+        "VLIO PC replay": {
+          "ate_m": 0.16937620781369744,
+          "sim3_scale": 0.9667611839218848,
+          "local_scale": 1.001300266364301,
+          "lidar_seq_median_mm": 5.756241658271266,
+          "lidar_revisit_median_mm": 37.67485104488888
+        },
+        "VLIO PC KF": {
+          "ate_m": 0.16387775361856124,
+          "sim3_scale": 0.9727075769056522,
+          "local_scale": 0.9968054579216821,
+          "lidar_seq_median_mm": 5.466055874336462,
+          "lidar_revisit_median_mm": 30.741630592842185
+        }
+      }
+    },
+    "2026-11-26_14-08-02": {
+      "duration_s": 197.70016374999977,
+      "rgbd_frames": 1977,
+      "arkit_fps": 60,
+      "vlio_source": "VLIO device KF",
+      "sources": {
+        "ARKit VIO": {
+          "ate_m": 0.02949682717975824,
+          "sim3_scale": 0.9982250357532956,
+          "local_scale": 0.9835107180438603,
+          "lidar_seq_median_mm": 4.927792012752952,
+          "lidar_revisit_median_mm": 11.038227550861812
+        },
+        "Offline BA": {
+          "ate_m": 3.695126124255487e-16,
+          "sim3_scale": 0.9999999999999998,
+          "local_scale": 1.0,
+          "lidar_seq_median_mm": 4.937775310417503,
+          "lidar_revisit_median_mm": 11.311746166955405
+        },
+        "VLIO on-device": {
+          "ate_m": 0.2897721019698903,
+          "sim3_scale": 0.9522903102779303,
+          "local_scale": 1.0120409728128226,
+          "lidar_seq_median_mm": 7.420457192581553,
+          "lidar_revisit_median_mm": 43.744588228406656
+        },
+        "VLIO device KF": {
+          "ate_m": 0.28336244977740527,
+          "sim3_scale": 0.9490655581831795,
+          "local_scale": 1.0027678139091767,
+          "lidar_seq_median_mm": 7.703817770462251,
+          "lidar_revisit_median_mm": 42.85542537202769
+        },
+        "VLIO PC replay": {
+          "ate_m": 0.3700546749579456,
+          "sim3_scale": 0.9443933571844702,
+          "local_scale": 1.0093619670992338,
+          "lidar_seq_median_mm": 7.545699800333594,
+          "lidar_revisit_median_mm": 58.66348983403091
+        },
+        "VLIO PC KF": {
+          "ate_m": 0.3542378799791093,
+          "sim3_scale": 0.9330912339832756,
+          "local_scale": 1.0049758326485387,
+          "lidar_seq_median_mm": 6.758483592887887,
+          "lidar_revisit_median_mm": 44.92192687458329
+        }
+      }
+    }
+  },
+  "ablation": {
+    "recording": "2026-11-26_14-08-02",
+    "rows": [
+      {
+        "variant": "base",
+        "label": "Full VLIO (default)",
+        "ate_m": 0.3542378799791093,
+        "sim3_scale": 0.9330912339832756,
+        "local_scale": 1.0049758326485387
+      },
+      {
+        "variant": "nodepth",
+        "label": "No LiDAR",
+        "ate_m": 0.14753855817870248,
+        "sim3_scale": 1.023143122653603,
+        "local_scale": 0.9675972337352805
+      },
+      {
+        "variant": "hostonly",
+        "label": "LiDAR on first observation only",
+        "ate_m": 0.32128497433864456,
+        "sim3_scale": 0.9636570431151463,
+        "local_scale": 1.0041985236462652
+      },
+      {
+        "variant": "targetonly",
+        "label": "LiDAR on later observations only",
+        "ate_m": 0.26445561508949716,
+        "sim3_scale": 0.9498521362433507,
+        "local_scale": 1.006871226395576
+      },
+      {
+        "variant": "alldepth",
+        "label": "LiDAR on all features (no flatness test)",
+        "ate_m": 0.2870713760170823,
+        "sim3_scale": 0.9274779580180144,
+        "local_scale": 1.0141285019055921
+      },
+      {
+        "variant": "loosedepth",
+        "label": "LiDAR noise x3",
+        "ate_m": 0.3465633935436473,
+        "sim3_scale": 0.9386408816865901,
+        "local_scale": 1.0056971325123154
+      },
+      {
+        "variant": "tightpx",
+        "label": "Pixel noise x2",
+        "ate_m": 0.22975019301367228,
+        "sim3_scale": 0.952360864347216,
+        "local_scale": 1.0081808371120584
+      },
+      {
+        "variant": "age10",
+        "label": "Tracks capped at 10 frames",
+        "ate_m": 0.3051265100600226,
+        "sim3_scale": 0.946460344709165,
+        "local_scale": 1.006961125998828
+      }
+    ]
+  },
+  "lidar_vs_triangulation": {
+    "2026-11-26_14-08-02": {
+      "ARKit VIO": {
+        "n": 17060,
+        "median": -0.04258551482924238,
+        "q25": -0.07826892508083513,
+        "q75": -0.01361266493539673
+      },
+      "Offline BA": {
+        "n": 16358,
+        "median": -0.0005111028608451799,
+        "q25": -0.013855696373326573,
+        "q75": 0.010729534511819065
+      }
+    },
+    "2026-11-26_00-15-22": {
+      "ARKit VIO": {
+        "n": 6592,
+        "median": -0.03542667485696792,
+        "q25": -0.08039022719057855,
+        "q75": -0.0059141686408957835
+      },
+      "Offline BA": {
+        "n": 6476,
+        "median": -0.00394470475816089,
+        "q25": -0.019133717660192923,
+        "q75": 0.00897007524929896
+      }
+    }
+  }
+}
