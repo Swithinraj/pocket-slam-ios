@@ -42,13 +42,13 @@ struct ContentView: View {
 
             VStack(spacing: 12) {
                 topBar
-                if showDetails {
+                if showDetails && sensors.isTracking {
                     TelemetryCard(telemetry: sensors.telemetry, vlio: liveVlio ? sensors.vlio : nil)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 Spacer()
-                if showMap {
+                if showMap && sensors.isTracking {
                     HStack {
                         Spacer()
                         TrajectoryMapView(points: sensors.trajectory,
@@ -151,15 +151,13 @@ struct ContentView: View {
                 showDetails.toggle()
             } label: {
                 StatusPill(telemetry: sensors.telemetry, vlio: liveVlio ? sensors.vlio : nil, thermal: sensors.thermal,
-                           expanded: showDetails)
+                           tracking: sensors.isTracking, expanded: showDetails)
             }
             .buttonStyle(.plain)
+            .disabled(!sensors.isTracking)
 
             Spacer()
 
-            CircleIconButton(systemName: "folder") { showRecordings = true }
-                .disabled(isRecording)
-                .opacity(isRecording ? 0.4 : 1)
             CircleIconButton(systemName: "gearshape") { showSettings = true }
                 .disabled(isRecording)
                 .opacity(isRecording ? 0.4 : 1)
@@ -177,12 +175,10 @@ struct ContentView: View {
                 toggleRecording()
             }
             Spacer()
-            CircleIconButton(systemName: "arrow.counterclockwise", size: 52) {
-                sensors.reset()
-                flash("Tracking reset")
-            }
-            .disabled(isRecording)
-            .opacity(isRecording ? 0.4 : 1)
+            CircleIconButton(systemName: "folder", size: 52) { showRecordings = true }
+                .disabled(isRecording)
+                .opacity(isRecording ? 0.4 : 1)
+                .accessibilityLabel("Recordings")
         }
         .padding(.horizontal, 8)
     }
@@ -296,21 +292,24 @@ struct StatusPill: View {
     let telemetry: Telemetry
     let vlio: VlioStatus?
     let thermal: ProcessInfo.ThermalState
+    let tracking: Bool
     let expanded: Bool
+
+    private var dotColor: Color { tracking ? telemetry.quality.color : .white.opacity(0.6) }
 
     var body: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(telemetry.quality.color)
+                .fill(dotColor)
                 .frame(width: 9, height: 9)
-                .shadow(color: telemetry.quality.color.opacity(0.8), radius: 4)
-            Text(telemetry.trackingText)
+                .shadow(color: dotColor.opacity(0.8), radius: 4)
+            Text(tracking ? telemetry.trackingText : "Ready to scan")
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
-            if telemetry.depthSize != "—" {
+            if tracking && telemetry.depthSize != "—" {
                 chip("LiDAR", .white.opacity(0.15))
             }
-            if let vlio {
+            if tracking, let vlio {
                 chip(vlio.initialized ? String(format: "VLIO %.0f Hz", vlio.hz) : "VLIO …",
                      vlio.initialized ? Color.orange.opacity(0.35) : Color.white.opacity(0.1))
             }
@@ -320,10 +319,12 @@ struct StatusPill: View {
             case .critical: chip("Too hot", Color.red.opacity(0.6))
             default: EmptyView()
             }
-            Image(systemName: "chevron.down")
-                .font(.caption.weight(.bold))
-                .rotationEffect(.degrees(expanded ? 180 : 0))
-                .foregroundStyle(.secondary)
+            if tracking {
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.bold))
+                    .rotationEffect(.degrees(expanded ? 180 : 0))
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)

@@ -86,11 +86,18 @@ Build only (no phone needed): `cd App && xtool dev build -c release`.
 
 ## 5. Scan
 
-* Red button: start / stop. While recording the screen has a red border and a badge with time, RGB-D
-  frames, size, dropped and missed frames.
+* **Idle**: the app shows only the camera feed ("Ready to scan"). ARKit runs its lightest
+  configuration (orientation only): no world tracking, LiDAR, mesh, IMU logging or VLIO.
+* **Red button**: starts a recording. Only now does full tracking start (world tracking from a fresh
+  origin, LiDAR depth and mesh, 100 Hz IMU, optional live VLIO). The first ~1 s shows "Initializing"
+  while ARKit starts tracking; those frames are recorded and flagged. While recording the screen has a red
+  border and a badge with time, RGB-D frames, size, dropped and missed frames. Stop returns to the
+  camera-only view.
 * After **stop**, processing starts by itself (banner with progress). It writes the RGB-aligned depth and
   runs the VLIO core over the scan. It pauses while you record the next scan and resumes afterwards.
-* Folder button: recordings with their processing state, share (zip), delete, **Process** for older scans.
+* **Folder button** (bottom right): recordings with their processing state. Each row has a ⋯ menu
+  (Share as zip, Process, Delete); swipe left to delete; **Select** deletes several at once (with
+  Select All). Deleting a recording that is being processed stops that job first.
 * Settings: camera rate (60 / 30 fps), RGB-D rate and size, mesh export, live VLIO preview.
 
 Tips for good data: move slowly, keep textured surfaces 0.5-3 m away, avoid pointing at blank walls, and

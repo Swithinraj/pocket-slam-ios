@@ -7,7 +7,12 @@ struct RecordingsView: View {
     @State private var recordings: [RecordingSummary] = []
     @State private var preparing: String?
     @State private var shareItem: ShareItem?
-    @State private var pendingDelete: RecordingSummary?
+    @State private var pendingDelete: [RecordingSummary] = []
+    @State private var selecting = false
+    @State private var selection = Set<String>()
+    @State private var deleting = false
+
+    private var totalBytes: Int64 { recordings.reduce(0) { $0 + $1.bytes } }
 
     var body: some View {
         NavigationStack {
@@ -17,29 +22,55 @@ struct RecordingsView: View {
                                            systemImage: "record.circle",
                                            description: Text("Tap the red button to record a session."))
                 } else {
-                    List {
+                    List(selection: $selection) {
                         Section {
                             ForEach(recordings) { recording in
                                 row(recording)
+                                    .tag(recording.id)
                                     .swipeActions {
                                         Button(role: .destructive) {
-                                            pendingDelete = recording
+                                            pendingDelete = [recording]
                                         } label: {
                                             Label("Delete", systemImage: "trash")
                                         }
                                     }
                             }
+                        } header: {
+                            Text("\(recordings.count) recordings · \(ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file))")
                         } footer: {
-                            Text("Total \(ByteCountFormatter.string(fromByteCount: recordings.reduce(0) { $0 + $1.bytes }, countStyle: .file))")
+                            Text("Swipe left on a recording, use its ⋯ menu, or tap Select to delete several at once.")
                         }
                     }
+                    .environment(\.editMode, .constant(selecting ? .active : .inactive))
                 }
             }
             .navigationTitle("Recordings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if !recordings.isEmpty {
+                        Button(selecting ? "Cancel" : "Select") {
+                            selecting.toggle()
+                            selection.removeAll()
+                        }
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
+                }
+                if selecting {
+                    ToolbarItemGroup(placement: .bottomBar) {
+                        Button(selection.count == recordings.count ? "Deselect All" : "Select All") {
+                            selection = selection.count == recordings.count ? [] : Set(recordings.map(\.id))
+                        }
+                        Spacer()
+                        Button(role: .destructive) {
+                            pendingDelete = recordings.filter { selection.contains($0.id) }
+                        } label: {
+                            Text(selection.isEmpty ? "Delete" : "Delete (\(selection.count))")
+                        }
+                        .disabled(selection.isEmpty)
+                    }
                 }
             }
             .onAppear(perform: reload)
@@ -47,18 +78,30 @@ struct RecordingsView: View {
             .sheet(item: $shareItem) { item in
                 ActivityView(items: [item.url])
             }
-            .confirmationDialog("Delete this recording?",
-                                isPresented: Binding(get: { pendingDelete != nil },
-                                                     set: { if !$0 { pendingDelete = nil } }),
-                                titleVisibility: .visible,
-                                presenting: pendingDelete) { recording in
-                Button("Delete \(recording.sizeText)", role: .destructive) {
-                    try? FileManager.default.removeItem(at: recording.url)
-                    reload()
+            .confirmationDialog(deleteTitle,
+                                isPresented: Binding(get: { !pendingDelete.isEmpty },
+                                                     set: { if !$0 { pendingDelete = [] } }),
+                                titleVisibility: .visible) {
+                Button("Delete \(ByteCountFormatter.string(fromByteCount: pendingDelete.reduce(0) { $0 + $1.bytes }, countStyle: .file))",
+                       role: .destructive) {
+                    delete(pendingDelete)
+                }
+            } message: {
+                Text("This permanently removes the recorded images, depth, IMU data and results from the phone.")
+            }
+            .overlay {
+                if deleting {
+                    ProgressView("Deleting…")
+                        .padding(24)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
                 }
             }
         }
         .preferredColorScheme(.dark)
+    }
+
+    private var deleteTitle: String {
+        pendingDelete.count == 1 ? "Delete this recording?" : "Delete \(pendingDelete.count) recordings?"
     }
 
     private func row(_ recording: RecordingSummary) -> some View {
@@ -78,14 +121,34 @@ struct RecordingsView: View {
             Spacer()
             if preparing == recording.id {
                 ProgressView()
-            } else {
-                Button {
-                    share(recording)
+            } else if !selecting {
+                Menu {
+                    Button {
+                        share(recording)
+                    } label: {
+                        Label("Share (zip)", systemImage: "square.and.arrow.up")
+                    }
+                    .disabled(preparing != nil)
+                    if !recording.processed && processing.fraction(for: recording.url) == nil && !processing.isQueued(recording.url) {
+                        Button {
+                            processing.enqueue(recording.url)
+                        } label: {
+                            Label("Process", systemImage: "gearshape.2")
+                        }
+                    }
+                    Divider()
+                    Button(role: .destructive) {
+                        pendingDelete = [recording]
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
                 } label: {
-                    Image(systemName: "square.and.arrow.up")
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
-                .disabled(preparing != nil)
+                .accessibilityLabel("Actions for \(recording.title)")
             }
         }
         .padding(.vertical, 4)
@@ -103,17 +166,39 @@ struct RecordingsView: View {
         } else if recording.processed {
             Label("Processed", systemImage: "checkmark.seal.fill").font(.caption2).foregroundStyle(.green)
         } else {
-            Button {
-                processing.enqueue(recording.url)
-            } label: {
-                Label("Process", systemImage: "gearshape.2").font(.caption2.weight(.semibold))
-            }
-            .buttonStyle(.borderless)
+            Label("Not processed", systemImage: "circle.dashed").font(.caption2).foregroundStyle(.secondary)
         }
     }
 
     private func reload() {
         recordings = RecordingSummary.all()
+        selection.formIntersection(recordings.map(\.id))
+    }
+
+    /// Stops any processing of these recordings, then removes their folders off the main thread
+    /// (a scan can be thousands of files).
+    private func delete(_ items: [RecordingSummary]) {
+        let urls = items.map(\.url)
+        pendingDelete = []
+        deleting = true
+        let group = DispatchGroup()
+        for url in urls {
+            group.enter()
+            processing.discard(url) { group.leave() }
+        }
+        group.notify(queue: .global(qos: .userInitiated)) {
+            let fm = FileManager.default
+            for url in urls {
+                try? fm.removeItem(at: url)
+                try? fm.removeItem(at: fm.temporaryDirectory.appendingPathComponent(url.lastPathComponent + ".zip"))
+            }
+            DispatchQueue.main.async {
+                deleting = false
+                selecting = false
+                selection.removeAll()
+                reload()
+            }
+        }
     }
 
     private func share(_ recording: RecordingSummary) {

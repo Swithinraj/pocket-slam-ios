@@ -20,6 +20,7 @@ final class CancelToken: @unchecked Sendable {
 ///  - stage 1, GPU (Core Image): decode JPEG/PNG, 480x360 luma, LiDAR + confidence, RGB-aligned depth,
 ///  - stage 2, CPU (C++ core): IMU + frames into the sliding-window VLIO, strictly in order,
 ///  - stage 3, I/O: aligned-depth PNGs streamed to disk from pooled buffers on a small concurrent queue.
+/// Then loop closure over the whole scan (place recognition + LiDAR-verified loops + pose graph).
 final class RecordingProcessor: @unchecked Sendable {
     enum Failure: LocalizedError {
         case missing(String)
@@ -138,6 +139,7 @@ final class RecordingProcessor: @unchecked Sendable {
         var R_bc: [Double] = [0, -1, 0, -1, 0, 0, 0, 0, -1], p_bc: [Double] = [0, 0, 0]
         guard let core = slam_create(&R_bc, &p_bc, first.fx * trackScale) else { throw Failure.missing("VLIO core") }
         defer { slam_destroy(core) }
+        slam_enable_loop_closure(core, 1)
         let header = "# timestamp tx ty tz qx qy qz qw  (camera->world, OpenCV camera, VLIO world z-up)\n"
         var framesOut = Data(header.utf8)
         framesOut.reserveCapacity(frames.count * 90)
@@ -181,19 +183,47 @@ final class RecordingProcessor: @unchecked Sendable {
         writes.wait()
         if isCancelled() { return }
 
-        // ---- outputs: one write each
+        // ---- loop closure: revisits verified with LiDAR 3D, pose graph, every frame corrected
+        progress("Loop closure", 0.99)
+        var loops = SlamLoopStats()
+        slam_finish(core, &loops)
+        func finalTum(keyframes: Int32, header: String) -> Data {
+            let count = Int(slam_final_count(core, keyframes))
+            var buf = [Double](repeating: 0, count: 13 * max(count, 1))
+            let n = Int(slam_final_poses(core, keyframes, &buf, Int32(count)))
+            var out = Data(header.utf8)
+            out.reserveCapacity(header.utf8.count + n * 90)
+            for i in 0..<n { Self.appendTum(&out, buf, offset: 13 * i) }
+            return out
+        }
+        let slamFrames = finalTum(keyframes: 0,
+                                  header: "# timestamp tx ty tz qx qy qz qw  (camera->world after loop closure, VLIO world z-up)\n")
+        let slamKeyframes = finalTum(keyframes: 1, header: "# keyframes after loop closure, same convention\n")
+        if isCancelled() { return }
+
+        // ---- outputs: one write each (vlio_* = odometry only, slam_* = final, loop closed)
         try framesOut.write(to: dir.appendingPathComponent("vlio_frames_tum.txt"), options: .atomic)
         try kfOut.write(to: dir.appendingPathComponent("vlio_keyframes_tum.txt"), options: .atomic)
+        try slamFrames.write(to: dir.appendingPathComponent("slam_frames_tum.txt"), options: .atomic)
+        try slamKeyframes.write(to: dir.appendingPathComponent("slam_keyframes_tum.txt"), options: .atomic)
         let state: [String: Any] = [
             "status": "done",
-            "version": 1,
+            "version": 2,
+            "loop_closure": [
+                "candidates": Int(loops.candidates),
+                "verified": Int(loops.verified),
+                "accepted": Int(loops.accepted),
+                "max_correction_m": loops.max_correction_m,
+                "max_correction_deg": loops.max_correction_deg,
+                "ms": loops.ms,
+            ],
             "processed_at": ISO8601DateFormatter().string(from: Date()),
             "duration_s": Date().timeIntervalSince(started),
             "frames": frames.count,
             "keyframes": keyframes,
             "vlio_restarts": restarts,
             "solve_ms_mean": keyframes > 0 ? solveMs / Double(keyframes) : 0,
-            "steps": ["depth_aligned", "vlio"],
+            "steps": ["depth_aligned", "vlio", "loop_closure"],
             "conditions": DeviceConditions.snapshot,
         ]
         let json = try JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys])
@@ -375,6 +405,19 @@ final class ProcessingCenter: ObservableObject {
     func fraction(for url: URL) -> Double? { job?.url == url ? job?.fraction : nil }
     func isQueued(_ url: URL) -> Bool { pending.contains(url) }
 
+    /// Removes a recording from processing before it is deleted. `completion` runs (on the main actor)
+    /// once nothing touches the folder any more: immediately, or after the running job has stopped.
+    func discard(_ url: URL, completion: @escaping () -> Void) {
+        pending.removeAll { $0 == url }
+        if job?.url == url {
+            discardCompletions[url, default: []].append(completion)
+            token?.cancel()
+        } else {
+            completion()
+        }
+    }
+    private var discardCompletions: [URL: [() -> Void]] = [:]
+
     /// The camera, GPU and CPU belong to the scan while recording.
     func setScanning(_ value: Bool) {
         scanning = value
@@ -424,7 +467,9 @@ final class ProcessingCenter: ObservableObject {
         job = nil
         token = nil
         processor = nil
-        if cancelled {
+        if let completions = discardCompletions.removeValue(forKey: url) {
+            completions.forEach { $0() }                                  // being deleted: do not resume
+        } else if cancelled {
             if !pending.contains(url) { pending.insert(url, at: 0) }     // resume later
         } else if let error {
             message = "Processing failed: \(error.localizedDescription)"

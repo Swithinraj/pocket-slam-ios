@@ -37,8 +37,11 @@ final class SensorSession: ObservableObject {
     var captureFPS = 60
     /// Live VLIO preview while scanning (the full-precision VLIO always runs after the scan).
     var liveVlio = true {
-        didSet { engine.isEnabled = liveVlio }
+        didSet { engine.isEnabled = liveVlio && isTracking }
     }
+    /// false: camera feed only (lightest ARKit configuration, no LiDAR / mesh / IMU / VLIO).
+    /// true: full world tracking + LiDAR + IMU, only while a recording is running.
+    @Published private(set) var isTracking = false
 
     let arView: ARView
     let recorder = Recorder()
@@ -56,7 +59,7 @@ final class SensorSession: ObservableObject {
         // Only visual effects are disabled; none of them affects the recorded sensor data.
         arView.renderOptions.insert([.disableDepthOfField, .disableMotionBlur, .disablePersonOcclusion, .disableHDR,
                                      .disableCameraGrain, .disableAREnvironmentLighting, .disableGroundingShadows])
-        engine.isEnabled = liveVlio
+        engine.isEnabled = false
         processor = FrameProcessor(recorder: recorder, engine: engine)
         imuQueue.name = "slamtogo.imu"
         imuQueue.maxConcurrentOperationCount = 1
@@ -94,59 +97,88 @@ final class SensorSession: ObservableObject {
 
     // MARK: Session control
 
+    /// Shows the camera feed only. Tracking starts with a recording.
     func start() {
         guard !running else { return }
         running = true
-        arView.session.run(makeConfiguration(), options: [])
-        startIMU()
+        if isTracking {
+            arView.session.run(makeTrackingConfiguration(), options: [])
+            startIMU()
+        } else {
+            arView.session.run(Self.makeIdleConfiguration(), options: [.resetTracking, .removeExistingAnchors])
+        }
     }
 
-    /// Applies a new capture frame rate (restarts the session configuration, keeps the map).
+    /// Applies a new capture frame rate (used by the next recording).
     func applyCaptureFPS(_ fps: Int) {
-        guard fps != captureFPS else { return }
         captureFPS = fps
-        if running { arView.session.run(makeConfiguration(), options: []) }
     }
 
     func pause() {
         guard running else { return }
         running = false
         arView.session.pause()
-        motion.stopAccelerometerUpdates()
-        motion.stopGyroUpdates()
-        motion.stopMagnetometerUpdates()
+        stopIMU()
     }
 
-    /// Restart tracking from scratch: new world origin, mesh and trajectory cleared.
-    func reset() {
-        arView.session.run(makeConfiguration(), options: [.resetTracking, .removeExistingAnchors])
-        let processor = self.processor
-        arQueue.async { processor.resetStats() }
-        engine.reset()
+    /// Full world tracking + LiDAR + IMU from a fresh origin (called when a recording starts).
+    private func beginTracking() {
+        isTracking = true
         trajectory.removeAll()
         vlioTrajectory.removeAll()
-        telemetry.distance = 0
+        features.removeAll()
+        telemetry = Telemetry()
+        vlio = VlioStatus()
+        let processor = self.processor
+        arQueue.async { processor.resetStats() }
+        processor.isActive = true
+        engine.reset()
+        engine.isEnabled = liveVlio
+        arView.session.run(makeTrackingConfiguration(), options: [.resetTracking, .removeExistingAnchors])
+        startIMU()
+        applyMeshVisibility()
+    }
+
+    /// Back to the camera feed only: tracking, LiDAR, mesh, IMU and VLIO stop.
+    private func endTracking() {
+        isTracking = false
+        engine.isEnabled = false
+        processor.isActive = false
+        stopIMU()
+        features.removeAll()
+        if running {
+            arView.session.run(Self.makeIdleConfiguration(), options: [.resetTracking, .removeExistingAnchors])
+        }
+        applyMeshVisibility()
     }
 
     // MARK: Recording
 
     func startRecording(_ settings: RecordingSettings) throws {
         ProcessingCenter.shared.setScanning(true)
+        beginTracking()
         var settings = settings
         let format = arView.session.configuration?.videoFormat
         settings.frameRate = format?.framesPerSecond ?? 60
-        var info = Self.deviceInfo(lidar: telemetry.depthSize)
+        let lidar = ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) ? "256×192" : "none"
+        var info = Self.deviceInfo(lidar: lidar)
         info["conditions_at_start"] = DeviceConditions.snapshot
         if let format {
             info["video_format"] = "\(Int(format.imageResolution.width))x\(Int(format.imageResolution.height))@\(format.framesPerSecond)"
         }
-        try recorder.start(settings: settings, deviceInfo: info)
+        do {
+            try recorder.start(settings: settings, deviceInfo: info)
+        } catch {
+            endTracking()
+            throw error
+        }
         if let dir = recorder.directoryURL { engine.startRecording(to: dir) }
     }
 
     func stopRecording(completion: @escaping (RecordingSummary?) -> Void) {
         let anchors = arView.session.currentFrame?.anchors.compactMap { $0 as? ARMeshAnchor } ?? []
         engine.stopRecording()
+        endTracking()        // the recorder no longer needs ARKit: it only flushes and writes the mesh
         recorder.stop(meshAnchors: anchors) { summary in
             // Heavy, precise processing happens now, after the scan, at utility QoS.
             if let summary { ProcessingCenter.shared.enqueue(summary.url) }
@@ -157,7 +189,12 @@ final class SensorSession: ObservableObject {
 
     // MARK: Private
 
-    private func makeConfiguration() -> ARWorldTrackingConfiguration {
+    /// Lightest ARKit configuration that still drives the camera view: 3-DoF orientation only.
+    private static func makeIdleConfiguration() -> ARConfiguration {
+        AROrientationTrackingConfiguration()
+    }
+
+    private func makeTrackingConfiguration() -> ARWorldTrackingConfiguration {
         let config = ARWorldTrackingConfiguration()
         config.worldAlignment = .gravity
         // Explicit video format: 1920x1440 at the chosen rate (Apple: pick the format the app needs).
@@ -177,7 +214,7 @@ final class SensorSession: ObservableObject {
     }
 
     private func applyMeshVisibility() {
-        if showMesh {
+        if showMesh && isTracking {
             arView.debugOptions.insert(.showSceneUnderstanding)
         } else {
             arView.debugOptions.remove(.showSceneUnderstanding)
@@ -216,6 +253,12 @@ final class SensorSession: ObservableObject {
         }
     }
 
+    private func stopIMU() {
+        motion.stopAccelerometerUpdates()
+        motion.stopGyroUpdates()
+        motion.stopMagnetometerUpdates()
+    }
+
     private static func deviceInfo(lidar: String) -> [String: Any] {
         var sys = utsname()
         uname(&sys)
@@ -252,6 +295,14 @@ final class FrameProcessor: NSObject, ARSessionDelegate, @unchecked Sendable {
     private var imuWindowStart: TimeInterval = 0
     private var imuHz: Double = 0
 
+    // Idle (camera feed only): every frame is ignored immediately.
+    private let activeLock = NSLock()
+    private var active = false
+    var isActive: Bool {
+        get { activeLock.withLock { active } }
+        set { activeLock.withLock { active = newValue } }
+    }
+
     init(recorder: Recorder, engine: SlamEngine) {
         self.recorder = recorder
         self.engine = engine
@@ -266,6 +317,7 @@ final class FrameProcessor: NSObject, ARSessionDelegate, @unchecked Sendable {
     // MARK: ARSessionDelegate
 
     func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        guard isActive else { return }
         recorder.ingest(frame: frame)
         engine.ingest(frame: frame)
 
