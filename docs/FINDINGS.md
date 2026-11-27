@@ -127,9 +127,46 @@ PC replay of the core on 2026-11-26_14-08-02 (`tools/run_ablation.sh`):
 | Back-end solve per keyframe | 21-28 ms mean | 132 ms mean (debug build, `.utility` QoS) |
 | Post-scan processing, 198 s scan | n/a | 15.6 min before the release-build / QoS / vDSP fixes; re-measurement pending |
 
+## 10. Loop closure (`core/src/loop_closure.cpp`)
+
+Runs after the scan, over the whole recording:
+
+1. every keyframe keeps ~500 ORB-style features (FAST on a 4-level pyramid, intensity-centroid
+   orientation, 256-bit rotated binary descriptor) with the LiDAR depth at each corner (~25 KB per keyframe);
+2. revisit candidates from the trajectory estimate (camera centres < 2 m, viewing directions < 45°,
+   look-at points < 1.5 m, > 8 s apart), up to 4 per keyframe from different moments;
+3. verification: appearance matching (Hamming, ratio + mutual) united with guided matching (LiDAR corners
+   projected with the current estimate), 3-point RANSAC on LiDAR 3D-3D matches, a second guided round with
+   the RANSAC pose, Gauss-Newton on two-sided reprojection error, >= 20 inliers within 3 px, and agreement
+   with the trajectory within the drift expected for the time between visits;
+4. 4-DoF pose graph (position + yaw per keyframe; roll and pitch are observable from gravity) with VLIO
+   odometry edges and loop edges, sparse Cholesky, Cauchy kernel annealed from wide to narrow, inconsistent
+   loops dropped; detect -> optimise is repeated 3 times so loops hidden by drift are found;
+5. every frame is corrected by the keyframe corrections interpolated in time.
+
+PC replay of the same code the phone runs (`core/tools/run_recording`), reference = offline BA:
+
+| Recording | | ATE | Sim(3) scale | LiDAR consistency, revisits | loops accepted |
+|---|---|---|---|---|---|
+| 15-59-37 (249 s) | ARKit | **4.6 cm** | 1.013 | 31.4 mm | |
+| | VLIO odometry | 10.5 cm | 0.968 | 54.2 mm | |
+| | **VLIO + loop closure** | 4.9 cm | **0.997** | **9.9 mm** | 665 |
+| 14-08-02 (198 s) | ARKit | **2.9 cm** | 0.998 | **11.0 mm** | |
+| | VLIO odometry | 37.0 cm | 0.944 | 58.7 mm | |
+| | **VLIO + loop closure** | 11.0 cm | 0.968 | 15.9 mm | 286 |
+| 00-15-22 (85 s) | ARKit | 4.5 cm | 1.033 | 23.1 mm | |
+| | VLIO odometry | 5.9 cm | 0.981 | 49.2 mm | |
+| | **VLIO + loop closure** | **3.1 cm** | **0.991** | **14.9 mm** | 29 |
+
+On the longest scan the revisited LiDAR surfaces now line up better than the offline BA reference itself
+(9.9 vs 13.9 mm). The 198 s scan keeps 11 cm ATE: its odometry drifted ~95 cm before the start of the scan
+was revisited, and one stretch (40-60 s, 5° heading error in the odometry) is only seen again ~2 min later.
+Loop closure costs 2-13 s on one PC core per scan.
+
 ## Next steps
 
-1. Loop closure in the shared core (fixes heading drift; ~1700 revisits in the 198 s scan).
-2. Re-measure on-device processing time with the release build.
+1. Re-measure on-device processing time (now including loop closure) on the phone.
+2. Appearance-only place recognition (bag of words) for revisits after very large drift and across
+   re-initialised map segments.
 3. Per-frame pose refinement for non-keyframes; analytic Jacobians.
 4. Android port of the core (no LiDAR on the target phone: ML depth instead).

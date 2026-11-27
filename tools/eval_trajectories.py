@@ -3,7 +3,8 @@
     python eval_trajectories.py <recording_dir>
 
 Sources: ARKit VIO (trajectory_tum.txt), offline BA (_slam/trajectory_ba_tum.txt),
-on-device VLIO core real-time output (_vlio/vlio_frames_tum.txt) and its smoothed keyframes.
+on-device VLIO core real-time output (_vlio/vlio_frames_tum.txt) and its smoothed keyframes, and the
+final loop-closed trajectory (slam_frames_tum.txt on the phone, _vlio/slam_frames_tum.txt from the PC replay).
 Metrics: ATE after SE(3) alignment to the BA trajectory, Sim(3) scale, and dense multi-view LiDAR
 consistency (LiDAR of frame A reprojected into frame B), which needs no ground truth.
 """
@@ -114,7 +115,9 @@ def load_sources(rec) -> dict[str, dict[int, np.ndarray]]:
         ba = read_tum(rec.root / "_slam/trajectory_ba_tum.txt")
         sources["Offline BA"] = {i: arkit_to_cv(ba[key(ts[i])]) for i in rgbd if key(ts[i]) in ba}
     q = {i: float(ts[i]) for i in rgbd}
-    if (rec.root / "vlio_frames_tum.txt").exists():           # computed on the phone
+    if (rec.root / "vlio_live_frames_tum.txt").exists():      # live preview during the scan (phone)
+        sources["VLIO live"] = interpolate(read_tum(rec.root / "vlio_live_frames_tum.txt"), q)
+    if (rec.root / "vlio_frames_tum.txt").exists():           # computed on the phone after the scan
         sources["VLIO on-device"] = interpolate(read_tum(rec.root / "vlio_frames_tum.txt"), q)
         sources["VLIO device KF"] = interpolate(read_tum(rec.root / "vlio_keyframes_tum.txt"), q, max_gap=0.5)
     if (rec.root / "_vlio/vlio_frames_tum.txt").exists():      # PC replay of the same core
@@ -122,6 +125,11 @@ def load_sources(rec) -> dict[str, dict[int, np.ndarray]]:
         sources["VLIO PC replay"] = {i: vl[key(ts[i])] for i in rgbd if key(ts[i]) in vl}
         vk = read_tum(rec.root / "_vlio/vlio_keyframes_tum.txt")
         sources["VLIO PC KF"] = {i: vk[key(ts[i])] for i in rgbd if key(ts[i]) in vk}
+    # Final trajectories after loop closure (on the phone after processing v2+, or the PC replay).
+    if (rec.root / "slam_frames_tum.txt").exists():
+        sources["SLAM on-device"] = interpolate(read_tum(rec.root / "slam_frames_tum.txt"), q)
+    if (rec.root / "_vlio/slam_frames_tum.txt").exists():
+        sources["SLAM PC replay"] = interpolate(read_tum(rec.root / "_vlio/slam_frames_tum.txt"), q)
     return sources
 
 

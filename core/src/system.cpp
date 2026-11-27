@@ -9,7 +9,18 @@
 namespace slamcore {
 
 System::System(const SystemConfig& cfg)
-    : cfg_(cfg), tracker_(cfg.tracker), estimator_(cfg.estimator, cfg.imu, cfg.extrinsics) {}
+    : cfg_(cfg), tracker_(cfg.tracker), estimator_(cfg.estimator, cfg.imu, cfg.extrinsics), loop_(cfg.loop) {}
+
+void System::collectFinalized(bool includeWindow) {
+    auto keep = [&](double t, const NavState& x) {
+        const Pose P = toCamera(x);
+        pending_.push_back({t, P});
+        if (cfg_.loop_closure) smoothed_.push_back({t, P});
+    };
+    for (const auto& [t, x] : estimator_.takeFinalized()) keep(t, x);
+    if (includeWindow)
+        for (const auto& kf : estimator_.window()) keep(kf.t, kf.x);
+}
 
 void System::addImu(const ImuSample& s) {
     if (!imu_.empty() && s.t <= imu_.back().t) return;
@@ -100,6 +111,7 @@ FrameResult System::addFrame(double t, const GrayImage& image, const PinholeCame
     // seconds, so start a fresh map instead (the caller re-anchors it).
     const bool wasInitialized = estimator_.initialized();
     if (wasInitialized && (t - last_frame_t_ > cfg_.max_frame_gap || res.tracked < cfg_.min_tracked)) {
+        collectFinalized(true);   // the old map's keyframes are final now
         estimator_ = Estimator(cfg_.estimator, cfg_.imu, cfg_.extrinsics);
         pre_.reset();
     }
@@ -127,6 +139,11 @@ FrameResult System::addFrame(double t, const GrayImage& image, const PinholeCame
         res.keyframe = true;
         res.reinitialized = wasInitialized;
         res.camera = toCamera(estimator_.latest().x);
+        if (cfg_.loop_closure) {
+            ++segment_;
+            loop_.addKeyframe(t, segment_, image, cam, depth);
+            frames_.push_back({t, res.camera, segment_});
+        }
         return res;
     }
 
@@ -158,6 +175,8 @@ FrameResult System::addFrame(double t, const GrayImage& image, const PinholeCame
         estimator_.addKeyframe(t, std::move(pre_), observations(feats, cam, depth));
         estimator_.process();
         tracker_.remove(estimator_.takeRejected());
+        collectFinalized(false);
+        if (cfg_.loop_closure) loop_.addKeyframe(t, segment_, image, cam, depth);
         const NavState& x = estimator_.latest().x;
         pre_ = std::make_unique<Preintegration>(x.ba, x.bg, cfg_.imu);
         last_kf_t_ = t;
@@ -182,12 +201,14 @@ FrameResult System::addFrame(double t, const GrayImage& image, const PinholeCame
     }
     res.initialized = true;
     res.landmarks = estimator_.activeLandmarks();
+    if (cfg_.loop_closure) frames_.push_back({t, res.camera, segment_});
     return res;
 }
 
 std::vector<std::pair<double, Pose>> System::takeFinalizedKeyframes() {
     std::vector<std::pair<double, Pose>> out;
-    for (const auto& [t, x] : estimator_.takeFinalized()) out.push_back({t, toCamera(x)});
+    collectFinalized(false);
+    out.swap(pending_);
     return out;
 }
 
@@ -195,6 +216,69 @@ std::vector<std::pair<double, Pose>> System::windowKeyframes() const {
     std::vector<std::pair<double, Pose>> out;
     for (const auto& kf : estimator_.window()) out.push_back({kf.t, toCamera(kf.x)});
     return out;
+}
+
+
+namespace {
+
+/// Rigid correction C with T_corrected = C * T, interpolated between two keyframes.
+Pose blend(const Pose& A, const Pose& B, double w) {
+    const Eigen::Quaterniond qa(A.R), qb(B.R);
+    return {qa.slerp(w, qb).toRotationMatrix(), (1 - w) * A.p + w * B.p};
+}
+
+}  // namespace
+
+LoopStats System::finish() {
+    LoopStats st;
+    final_frames_.clear();
+    final_keyframes_.clear();
+    if (!cfg_.loop_closure || frames_.empty()) return st;
+
+    // Keyframes still in the window are final now too (they also go to takeFinalizedKeyframes()).
+    collectFinalized(true);
+    std::unordered_map<double, Pose> smooth(smoothed_.begin(), smoothed_.end());
+    std::unordered_map<double, Pose> causal;
+    for (const FrameRecord& f : frames_) causal[f.t] = f.P;
+
+    const auto& kfs = loop_.keyframes();
+    std::vector<Pose> poses(kfs.size());
+    for (size_t k = 0; k < kfs.size(); ++k) {
+        auto it = smooth.find(kfs[k].t);
+        poses[k] = it != smooth.end() ? it->second : causal[kfs[k].t];
+    }
+    const std::vector<Pose> fixed = loop_.optimize(poses, &st);
+
+    // Per keyframe correction relative to its real-time pose (includes the window smoothing).
+    struct Corr {
+        double t;
+        int segment;
+        Pose C;
+    };
+    std::vector<Corr> corr;
+    corr.reserve(kfs.size());
+    for (size_t k = 0; k < kfs.size(); ++k) {
+        final_keyframes_.push_back({kfs[k].t, fixed[k]});
+        const Pose& P = causal[kfs[k].t];
+        const Mat3 R = fixed[k].R * P.R.transpose();
+        corr.push_back({kfs[k].t, kfs[k].segment, {R, fixed[k].p - R * P.p}});
+    }
+    final_frames_.reserve(frames_.size());
+    size_t j = 0;
+    for (const FrameRecord& f : frames_) {
+        while (j + 1 < corr.size() && corr[j + 1].t <= f.t) ++j;
+        Pose C = corr[j].C;
+        if (corr[j].segment != f.segment) {
+            // Before the first keyframe of this segment: use the segment's first correction.
+            for (size_t k = j; k < corr.size(); ++k)
+                if (corr[k].segment == f.segment) { C = corr[k].C; break; }
+        } else if (j + 1 < corr.size() && corr[j + 1].segment == f.segment && f.t > corr[j].t) {
+            const double w = (f.t - corr[j].t) / (corr[j + 1].t - corr[j].t);
+            C = blend(corr[j].C, corr[j + 1].C, w);
+        }
+        final_frames_.push_back({f.t, {so3::normalize(C.R * f.P.R), C.R * f.P.p + C.p}});
+    }
+    return st;
 }
 
 }  // namespace slamcore

@@ -15,6 +15,8 @@ One folder per scan, `Documents/recordings/<yyyy-MM-dd_HH-mm-ss>/` on the phone.
 | `depth/NNNNNN.png` | *written by post-scan processing*: depth pixel-aligned with `rgb/`, same size, uint16 mm |
 | `vlio_frames_tum.txt` | *post-scan*: our VLIO camera pose for every RGB-D frame |
 | `vlio_keyframes_tum.txt` | *post-scan*: final (sliding-window smoothed) keyframe poses |
+| `slam_frames_tum.txt` | *post-scan, processing v2+*: **final trajectory** = VLIO + loop closure, every RGB-D frame |
+| `slam_keyframes_tum.txt` | *post-scan, processing v2+*: keyframe poses after loop closure |
 | `vlio_live_*_tum.txt` | live preview output (only if enabled) |
 | `processing.json` | processing status, duration, keyframes, restarts, mean solve time, conditions |
 

@@ -3,8 +3,11 @@
 //   run_recording <recording_dir> <out_dir> [--track-width 480]
 //
 // Outputs (camera poses, OpenCV camera convention, world z-up):
-//   vlio_frames_tum.txt     real-time pose of every RGB-D frame
-//   vlio_keyframes_tum.txt  final (smoothed) keyframe poses
+//   vlio_frames_tum.txt     real-time pose of every RGB-D frame (odometry)
+//   vlio_keyframes_tum.txt  final (smoothed) keyframe poses (odometry)
+//   slam_frames_tum.txt     every RGB-D frame after loop closure (final trajectory)
+//   slam_keyframes_tum.txt  keyframes after loop closure
+//   slam_loops.txt          accepted loop closures (keyframe times, inliers)
 //   vlio_map.ply            landmarks still in the map at the end
 //   vlio_stats.txt          timing
 #define STB_IMAGE_IMPLEMENTATION
@@ -99,6 +102,7 @@ int main(int argc, char** argv) {
     double flatness = -1, sigmaScale = 1, pixelSigma = -1;
     Vec3 pbc = Vec3::Zero();
     int maxAge = 0;
+    bool loop = true;
     for (int i = 3; i < argc; ++i) {
         const std::string a = argv[i];
         const bool hasValue = i + 1 < argc;
@@ -109,6 +113,7 @@ int main(int argc, char** argv) {
         else if (a == "--pixel-sigma" && hasValue) pixelSigma = std::stod(argv[++i]);
         else if (a == "--max-age" && hasValue) maxAge = std::stoi(argv[++i]);
         else if (a == "--no-host-depth") hostDepth = false;
+        else if (a == "--no-loop") loop = false;
         else if (a == "--no-target-depth") targetDepth = false;
         else if (a == "--pbc" && i + 3 < argc) {          // camera position in the IMU/body frame [m]
             pbc = Vec3(std::stod(argv[i + 1]), std::stod(argv[i + 2]), std::stod(argv[i + 3]));
@@ -165,6 +170,7 @@ int main(int argc, char** argv) {
     cfg.estimator.depth_on_host = hostDepth;
     cfg.estimator.depth_on_targets = targetDepth;
     if (pixelSigma > 0) cfg.estimator.pixel_sigma = pixelSigma;
+    cfg.loop_closure = loop;
 
     System sys(cfg);
     std::ofstream fo(outDir + "/vlio_frames_tum.txt"), fk(outDir + "/vlio_keyframes_tum.txt");
@@ -211,7 +217,28 @@ int main(int argc, char** argv) {
             std::printf("frame %4d  t=%7.2f  tracked %3d  landmarks %3d  kf %d  solve %.1f ms\n", n, t - frames[0][1],
                         r.tracked, r.landmarks, kfs, r.solve_ms);
     }
-    for (const auto& [tk, P] : sys.windowKeyframes()) writeTum(fk, tk, P);
+    if (loop) {
+        const LoopStats ls = sys.finish();
+        for (const auto& [tk, P] : sys.takeFinalizedKeyframes()) writeTum(fk, tk, P);
+        std::ofstream sf(outDir + "/slam_frames_tum.txt"), sk(outDir + "/slam_keyframes_tum.txt"),
+            sl(outDir + "/slam_loops.txt");
+        sf << "# timestamp tx ty tz qx qy qz qw  (camera->world after loop closure)\n";
+        sk << "# timestamp tx ty tz qx qy qz qw  (keyframes after loop closure)\n";
+        for (const auto& [tk, P] : sys.finalFrames()) writeTum(sf, tk, P);
+        for (const auto& [tk, P] : sys.finalKeyframes()) writeTum(sk, tk, P);
+        sl << "# t_a t_b inliers\n";
+        const auto& kfl = sys.loopCloser().keyframes();
+        for (const auto& e : sys.loopCloser().loops())
+            sl << std::fixed << kfl[e.a].t << " " << kfl[e.b].t << " " << e.inliers << "\n";
+        std::printf("loop closure: %d keyframes, %d candidates, %d verified, %d accepted, max correction %.1f cm / "
+                    "%.2f deg, %.0f ms\n",
+                    ls.keyframes, ls.candidates, ls.verified, ls.accepted, 100 * ls.max_correction_m,
+                    ls.max_correction_deg, ls.ms);
+        std::printf("  rejected: matches %d, ransac %d, inliers %d, prior %d\n", ls.rejected_matches, ls.rejected_ransac,
+                    ls.rejected_inliers, ls.rejected_prior);
+    } else {
+        for (const auto& [tk, P] : sys.windowKeyframes()) writeTum(fk, tk, P);
+    }
 
     std::ofstream fp(outDir + "/vlio_map.ply");
     const auto pts = sys.mapPoints();

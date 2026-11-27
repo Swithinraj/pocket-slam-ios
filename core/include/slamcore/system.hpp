@@ -1,6 +1,7 @@
 #pragma once
 
 #include "slamcore/estimator.hpp"
+#include "slamcore/loop_closure.hpp"
 #include "slamcore/tracker.hpp"
 
 #include <deque>
@@ -22,6 +23,8 @@ struct SystemConfig {
     int min_tracked = 8;             // fewer tracked features than this -> re-initialise
     double depth_flatness = 0.01;    // LiDAR used only where the 5x5 depth spread < flatness * (1 + d)
     double depth_sigma_scale = 1.0;  // multiplies the LiDAR depth noise model
+    bool loop_closure = false;       // keep keyframe features + all poses for finish() (post-scan processing)
+    LoopConfig loop;
 };
 
 struct FrameResult {
@@ -50,6 +53,13 @@ public:
     /// Camera poses of the keyframes still in the window (latest estimates).
     std::vector<std::pair<double, Pose>> windowKeyframes() const;
     std::vector<Vec3> mapPoints() const { return estimator_.landmarkPositions(); }
+
+    /// End of the sequence (needs cfg.loop_closure): loop closure over every keyframe, then every frame
+    /// pose is corrected by the interpolated keyframe correction. Results in finalFrames()/finalKeyframes().
+    LoopStats finish();
+    const std::vector<std::pair<double, Pose>>& finalFrames() const { return final_frames_; }
+    const std::vector<std::pair<double, Pose>>& finalKeyframes() const { return final_keyframes_; }
+    const LoopCloser& loopCloser() const { return loop_; }
     const std::vector<Feature>& features() const { return tracker_.features(); }
 
 private:
@@ -58,6 +68,7 @@ private:
     std::vector<FeatureObs> observations(const std::vector<Feature>& feats, const PinholeCamera& cam,
                                          const DepthMap* depth) const;
     Pose toCamera(const NavState& x) const;
+    void collectFinalized(bool includeWindow);
 
     SystemConfig cfg_;
     FeatureTracker tracker_;
@@ -67,6 +78,20 @@ private:
     double last_frame_t_ = -1, last_kf_t_ = -1;
     std::unordered_map<int, Vec2> kf_features_;   // feature positions at the last keyframe
     Mat3 R_bkf_bcur_ = Mat3::Identity();          // body rotation since the last keyframe (gyro)
+
+    // Smoothed keyframes not yet handed out by takeFinalizedKeyframes().
+    std::vector<std::pair<double, Pose>> pending_;
+    // Loop closure (cfg_.loop_closure): every frame's real-time pose, every keyframe's smoothed pose.
+    struct FrameRecord {
+        double t;
+        Pose P;
+        int segment;
+    };
+    LoopCloser loop_;
+    int segment_ = -1;
+    std::vector<FrameRecord> frames_;
+    std::vector<std::pair<double, Pose>> smoothed_;
+    std::vector<std::pair<double, Pose>> final_frames_, final_keyframes_;
 };
 
 }  // namespace slamcore

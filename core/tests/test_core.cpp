@@ -2,9 +2,12 @@
 //  1. IMU preintegration reproduces the true relative motion.
 //  2. The sliding-window estimator tracks a hand-held-like trajectory from noisy IMU (with biases),
 //     noisy feature observations and noisy LiDAR depth, through many marginalisations.
+//  3. Loop verification recovers a known relative pose between two views of a textured wall.
 #include "slamcore/estimator.hpp"
+#include "slamcore/loop_closure.hpp"
 #include "slamcore/so3.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -163,11 +166,68 @@ void testEstimator() {
     check((last.bg - bgTrue).norm() < 0.002, "gyro bias recovered (< 0.002 rad/s)");
 }
 
+void testLoopVerification() {
+    std::printf("loop verification\n");
+    // Fronto-parallel textured wall at Z = 2 m; view b is translated by t (camera b -> camera a: X_a = X_b + t).
+    const int W = 480, H = 360;
+    PinholeCamera cam;
+    cam.fx = cam.fy = 350;
+    cam.cx = W / 2.0;
+    cam.cy = H / 2.0;
+    cam.width = W;
+    cam.height = H;
+    const double Z = 2.0;
+    const Vec3 t(0.12, -0.05, 0.0);
+    std::mt19937 rng(7);
+    std::uniform_real_distribution<double> U(0, 1);
+    struct Blob { double x, y, r, a; };
+    std::vector<Blob> blobs(900);
+    for (auto& b : blobs) b = {U(rng) * 4 - 2, U(rng) * 3 - 1.5, 0.01 + 0.04 * U(rng), U(rng) * 200 - 100};
+    auto render = [&](const Vec3& offset) {     // camera centre at offset (wall coordinates)
+        GrayImage img;
+        img.width = W;
+        img.height = H;
+        img.data.resize(static_cast<size_t>(W) * H);
+        for (int y = 0; y < H; ++y)
+            for (int x = 0; x < W; ++x) {
+                const double X = (x - cam.cx) / cam.fx * Z + offset.x(), Y = (y - cam.cy) / cam.fy * Z + offset.y();
+                double v = 128;
+                for (const Blob& b : blobs) {
+                    const double d2 = (X - b.x) * (X - b.x) + (Y - b.y) * (Y - b.y);
+                    if (d2 < 9 * b.r * b.r) v += b.a * std::exp(-d2 / (2 * b.r * b.r));
+                }
+                img.data[static_cast<size_t>(y) * W + x] = static_cast<uint8_t>(std::clamp(v, 0.0, 255.0));
+            }
+        return img;
+    };
+    DepthMap depth;
+    depth.width = 256;
+    depth.height = 192;
+    depth.depth.assign(256 * 192, static_cast<float>(Z));
+    depth.confidence.assign(256 * 192, 2);
+    LoopCloser lc;
+    lc.addKeyframe(0.0, 0, render(Vec3::Zero()), cam, &depth);
+    lc.addKeyframe(30.0, 0, render(t), cam, &depth);
+    LoopEdge e;
+    LoopStats st;
+    Pose prior;
+    prior.p = t + Vec3(0.05, 0.03, 0.02);      // trajectory estimate with drift
+    prior.R = so3::exp(Vec3(0, 0, 0.02));
+    const bool ok = lc.verify(0, 1, prior, e, &st);
+    std::printf("  keypoints %zu / %zu, inliers %d, t = (%.3f %.3f %.3f), rot %.3f deg\n", lc.keyframes()[0].kps.size(),
+                lc.keyframes()[1].kps.size(), e.inliers, e.T_ab.p.x(), e.T_ab.p.y(), e.T_ab.p.z(),
+                Eigen::AngleAxisd(e.T_ab.R).angle() * 180 / M_PI);
+    check(ok, "loop verified");
+    check(ok && (e.T_ab.p - t).norm() < 0.01, "relative position error < 1 cm");
+    check(ok && Eigen::AngleAxisd(e.T_ab.R).angle() < 0.3 * M_PI / 180, "relative rotation error < 0.3 deg");
+}
+
 }  // namespace
 
 int main() {
     testPreintegration();
     testEstimator();
+    testLoopVerification();
     std::printf(failures ? "\n%d FAILED\n" : "\nALL PASSED\n", failures);
     return failures ? 1 : 0;
 }

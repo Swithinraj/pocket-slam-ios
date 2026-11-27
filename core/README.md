@@ -24,6 +24,7 @@ third_party/        eigen 3.4.0 (MPL2), stb_image (public domain, tools only)
 | Solver | Levenberg-Marquardt, landmarks eliminated by Schur complement, Huber, central-difference Jacobians on the manifold |
 | Window | 10 keyframes; the oldest is marginalised (Schur complement → eigen-decomposed linear prior) |
 | Init | gravity from the accelerometer; metric scale comes from LiDAR, so no visual-inertial scale initialisation is needed |
+| Loop closure (post-scan, `slam_enable_loop_closure` + `slam_finish`) | ORB-style keyframe features with LiDAR depth; pose-based candidates; guided + appearance matching, 3-point LiDAR RANSAC, reprojection refinement; 4-DoF pose graph (sparse Cholesky, annealed Cauchy); every frame corrected |
 
 ## Build and test (Linux / WSL)
 
@@ -46,10 +47,13 @@ python tools/eval_trajectories.py <rec>                      # compare with ARKi
 ## Runner options (for experiments)
 
 `run_recording <rec> <out> [--track-width 480] [--no-depth] [--no-host-depth] [--no-target-depth]
-[--flatness F] [--depth-sigma-scale S] [--pixel-sigma P] [--max-age N] [--pbc x y z]`
+[--flatness F] [--depth-sigma-scale S] [--pixel-sigma P] [--max-age N] [--pbc x y z] [--no-loop]`
+
+Writes `vlio_*` (odometry) and, unless `--no-loop`, `slam_frames_tum.txt` / `slam_keyframes_tum.txt` /
+`slam_loops.txt` (after loop closure).
 
 ## Next
 
-1. Loop closure (BRIEF/ORB descriptors + place recognition → pose graph / BA over keyframes): fixes heading drift.
+1. Appearance-only place recognition (bag of words) for very large drift and across map segments.
 2. Per-frame motion-only refinement (non-keyframe poses).
 3. Analytic Jacobians (5-10x faster solve).

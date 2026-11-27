@@ -47,14 +47,20 @@ Reference = offline loop-closed bundle adjustment of the same recording (see [FI
 
 | Recording | Length | Source | ATE | Local scale (2 s) | LiDAR consistency, revisits |
 |---|---|---|---|---|---|
+| 2026-11-26_15-59-37 | 249 s, 35.5 m | ARKit VIO | **4.6 cm** | 0.983 | 31.4 mm |
+| | | Our VLIO (odometry only) | 10.5 cm | 1.004 | 54.2 mm |
+| | | **Our SLAM** (VLIO + loop closure) | 4.9 cm | **0.999** | **9.9 mm** |
 | 2026-11-26_14-08-02 | 198 s, 33.9 m | ARKit VIO | **2.9 cm** | 0.984 | **11.0 mm** |
-| | | **Our VLIO** (computed on the phone) | 28.3 cm | **1.003** | 42.9 mm |
-| 2026-11-26_00-15-22 | 85 s, 10.9 m | ARKit VIO | **4.5 cm** | 0.965 | **23.1 mm** |
-| | | **Our VLIO** | 5.0 cm | **1.014** | 55.8 mm |
+| | | Our VLIO (odometry only) | 37.0 cm | 1.009 | 58.7 mm |
+| | | **Our SLAM** (VLIO + loop closure) | 11.0 cm | **1.002** | 15.9 mm |
+| 2026-11-26_00-15-22 | 85 s, 10.9 m | ARKit VIO | 4.5 cm | 0.965 | 23.1 mm |
+| | | Our VLIO (odometry only) | 5.9 cm | 1.018 | 49.2 mm |
+| | | **Our SLAM** (VLIO + loop closure) | **3.1 cm** | **1.013** | **14.9 mm** |
 
-* **Local metric accuracy**: our VLIO measures short motions to within 0.3–1.4 % (ARKit: 1.6–3.5 % short).
-* **Global accuracy**: limited by **heading drift** (2–8°); ARKit relocalises, our core has no loop
-  closure yet. That is the next step.
+* **Local metric accuracy**: our VLIO measures short motions to within 0.1–1.8 % (ARKit: 1.6–3.5 % short).
+* **Global accuracy**: odometry alone is limited by **heading drift** (2–8°). Post-scan **loop closure**
+  (LiDAR-verified revisits + 4-DoF pose graph) removes most of it: ATE below ARKit on the 85 s scan and within
+  0.3 cm of it on the 249 s scan, and revisited surfaces line up 1.5–3x better than ARKit's on both.
 * **Synthetic ground truth** (`core/tests`): 9.4 mm RMSE over 4.8 m, 0.32° max rotation error, biases recovered.
 
 <p align="center"><img src="docs/figures/fig4_scale_local_vs_global.png" width="760" alt="Local vs whole-trajectory scale"></p>

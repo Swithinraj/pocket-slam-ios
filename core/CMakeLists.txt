@@ -12,6 +12,7 @@ add_library(slamcore
   src/tracker.cpp
   src/estimator.cpp
   src/system.cpp
+  src/loop_closure.cpp
   src/slamcore_c.cpp)
 target_include_directories(slamcore PUBLIC include src/public third_party/eigen PRIVATE src)
 target_compile_options(slamcore PRIVATE -Wall -Wextra -Wno-unused-parameter)

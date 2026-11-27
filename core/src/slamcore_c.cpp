@@ -10,6 +10,7 @@
 using namespace slamcore;
 
 struct SlamHandle {
+    SystemConfig cfg;
     std::unique_ptr<System> sys;
     std::vector<std::pair<double, Pose>> finalized;
     GrayImage img;     // reused every frame (assign() keeps capacity: no per-frame allocation)
@@ -24,6 +25,7 @@ SlamHandle* slam_create(const double R_bc[9], const double p_bc[3], double focal
     cfg.extrinsics.p_bc = Vec3(p_bc[0], p_bc[1], p_bc[2]);
     cfg.estimator.focal = focal;
     auto* h = new SlamHandle;
+    h->cfg = cfg;
     h->sys = std::make_unique<System>(cfg);
     return h;
 }
@@ -131,6 +133,43 @@ int32_t slam_window_keyframes(SlamHandle* h, double* out, int32_t max_keyframes)
     const int n = std::min<int>(max_keyframes, static_cast<int>(kfs.size()));
     for (int i = 0; i < n; ++i) {
         const auto& [t, P] = kfs[i];
+        double* o = out + 13 * i;
+        o[0] = t;
+        for (int k = 0; k < 9; ++k) o[1 + k] = P.R(k / 3, k % 3);
+        for (int k = 0; k < 3; ++k) o[10 + k] = P.p(k);
+    }
+    return n;
+}
+
+void slam_enable_loop_closure(SlamHandle* h, int32_t enabled) {
+    h->cfg.loop_closure = enabled != 0;
+    h->sys = std::make_unique<System>(h->cfg);
+    h->finalized.clear();
+}
+
+int32_t slam_finish(SlamHandle* h, SlamLoopStats* stats) {
+    const LoopStats st = h->sys->finish();
+    if (stats) {
+        stats->keyframes = st.keyframes;
+        stats->candidates = st.candidates;
+        stats->verified = st.verified;
+        stats->accepted = st.accepted;
+        stats->max_correction_m = st.max_correction_m;
+        stats->max_correction_deg = st.max_correction_deg;
+        stats->ms = st.ms;
+    }
+    return static_cast<int32_t>(h->sys->finalFrames().size());
+}
+
+int32_t slam_final_count(SlamHandle* h, int32_t keyframes) {
+    return static_cast<int32_t>((keyframes ? h->sys->finalKeyframes() : h->sys->finalFrames()).size());
+}
+
+int32_t slam_final_poses(SlamHandle* h, int32_t keyframes, double* out, int32_t max_poses) {
+    const auto& v = keyframes ? h->sys->finalKeyframes() : h->sys->finalFrames();
+    const int n = std::min<int>(max_poses, static_cast<int>(v.size()));
+    for (int i = 0; i < n; ++i) {
+        const auto& [t, P] = v[i];
         double* o = out + 13 * i;
         o[0] = t;
         for (int k = 0; k < 9; ++k) o[1 + k] = P.R(k / 3, k % 3);

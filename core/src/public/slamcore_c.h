@@ -51,6 +51,29 @@ int32_t slam_take_finalized(SlamHandle* h, double* out, int32_t max_keyframes);
 /* Keyframes still in the sliding window (latest estimates), same layout. Use at the end of a sequence. */
 int32_t slam_window_keyframes(SlamHandle* h, double* out, int32_t max_keyframes);
 
+/* ---- Loop closure (post-scan processing) ---- */
+
+typedef struct {
+    int32_t keyframes;
+    int32_t candidates;         /* keyframe pairs tested */
+    int32_t verified;           /* geometrically verified */
+    int32_t accepted;           /* kept by the pose graph */
+    double max_correction_m;    /* largest keyframe position change */
+    double max_correction_deg;  /* largest keyframe heading change */
+    double ms;
+} SlamLoopStats;
+
+/* Keep keyframe features and every pose so slam_finish can close loops. Call before the first frame
+   (costs ~25 KB per keyframe and ~2 ms per keyframe; meant for post-scan processing, not live preview). */
+void slam_enable_loop_closure(SlamHandle* h, int32_t enabled);
+/* End of the sequence: detect and verify loops, optimise the pose graph, correct every frame.
+   Returns the number of corrected frame poses (0 if loop closure is disabled). */
+int32_t slam_finish(SlamHandle* h, SlamLoopStats* stats);
+/* After slam_finish: corrected poses, 13 doubles each (t, R row-major 9, p 3).
+   keyframes = 0: every frame given to slam_add_frame that had a pose; 1: keyframes only. */
+int32_t slam_final_count(SlamHandle* h, int32_t keyframes);
+int32_t slam_final_poses(SlamHandle* h, int32_t keyframes, double* out, int32_t max_poses);
+
 #ifdef __cplusplus
 }
 #endif
